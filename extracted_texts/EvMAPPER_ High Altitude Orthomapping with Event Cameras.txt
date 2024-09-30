@@ -1,0 +1,869 @@
+EvMAPPER: High Altitude Orthomapping with Event Cameras
+Fernando Cladera, Kenneth Chaney,
+M. Ani Hsieh, Camillo J. Taylor, and Vijay Kumar
+Abstract— Traditionally, unmanned aerial vehicles (UAVs)
+rely on CMOS-based cameras to collect images about the
+world below. One of the most successful applications of UAVs
+is to generate orthomosaics or orthomaps, in which a series
+of images are integrated together to develop a larger map.
+However, the use of CMOS-based cameras with global or rolling
+shutters mean that orthomaps are vulnerable to challenging
+light conditions, motion blur, and high-speed motion of inde-
+pendently moving objects under the camera. Event cameras
+are less sensitive to these issues, as their pixels are able
+to trigger asynchronously on brightness changes. This work
+introduces the first orthomosaic approach using event cameras.
+In contrast to existing methods relying only on CMOS cameras,
+our approach enables map generation even in challenging light
+conditions, including direct sunlight and after sunset.
+The source code for EvMAPPER, the high-altitude hard-
+ware, and the dataset collected in this paper are available
+open source1.
+I. INTRODUCTION
+High-altitude photography has proven useful for surveil-
+lance, mapping and inspection applications. High-vantage
+points can provide information that is not easily accessible
+by ground imaging. Additionally, high-altitude photography
+offers superior ground resolution distance (GRD) compared
+to satellite imagery. This advantage is due to lower flight
+altitude, the limitations imposed by the Rayleigh criterion
+limit [1], and reduced effects of atmospheric conditions [2].
+High-altitude images are usually integrated together into
+orthomosaics by projecting the images into a planar map.
+Orthomosaics are generated with proven computer vision
+techniques, such as structure from motion (SFM) and mesh
+reconstructions. There are multiple commercial-off-the-shelf
+(COTS) software packages for creating orthomosaics, such
+as Pix4D [3] and OpenDroneMap (ODM) [4]. The ortho-
+mosaic’s quality directly depends on the quality of the input
+images. Generating orthomosaics is an offline process that
+is prone to failures if the data is not properly conditioned.
+For example, blurry images may lead to fewer features and
+hinder the feature matching process. Similarly, low overlap
+between images, strong winds, or vibrations can also lead to
+failures [5].
+Some of the issues encountered during orthomosaic cre-
+ation stem from the limitations of the sensors employed.
+All authors are with GRASP Laboratory, University of Pennsylvania.
+Corresponding author: fclad@seas.upenn.edu.
+We gratefully acknowledge the support of ARL DCIST CRA W911NF-
+17-2-0181, NIFA grant 2022-67021-36856, the IoT4Ag Engineering Re-
+search Center funded by the National Science Foundation (NSF) under NSF
+Cooperative Agreement Number EEC-1941529, and NVIDIA.
+1https://evmapper.fcladera.com
+Fig. 1.
+Top: The Falcon 4 aerial platform used for high-altitude ex-
+periments. The sensor stack, equipped with an IMU, a range sensor, an
+RGB camera, and an event camera, was mounted at the front. Bottom left:
+artifacts of CMOS-based cameras in high-altitude photography: the sidewalk
+is washed out due to high brightness. Bottom right: reconstructed frame
+with event cameras displaying higher level of detail in challenging light
+conditions.
+CMOS-based cameras are susceptible to motion blur due to
+wind or unmanned aerial vehicle (UAV) vibration, particu-
+larly when long exposures are used. Their limited dynamic
+range makes it difficult to capture regions with both high
+brightness and shadows. Fast movements under the camera,
+resulting from high flight speeds, can lead to failed feature
+matches for SFM. Finally, rolling-shutter CMOS-based cam-
+eras are susceptible to distortion due to the linear readout of
+pixels. Some of the examples of these issues are observed in
+Fig. 1. There are strengths to CMOS-based cameras and to
+overcome the above limitations we seek methods to replace
+and/or augment existing CMOS-based camera data.
+Event cameras are increasingly used in robotics to over-
+come the limitations of CMOS-based cameras, thanks to
+their superior dynamic range, higher temporal resolution, and
+reduced motion blur. Recently, event cameras have seen a
+significant increase in resolution, nearing the 1 Megapixel
+mark. This resolution increase makes event cameras useful
+for applications where high detail is required. While some
+arXiv:2409.18120v1  [cs.RO]  26 Sep 2024
+works have used event cameras for high-altitude HDR [6]
+imaging or low-light navigation [7], no prior work has
+explored the use of event cameras for high-resolution or-
+thomosaics. We believe that event cameras can be leveraged
+to overcome the limitations of traditional imaging sensors
+in various robotics applications, particularly given the recent
+success of high-altitude imaging using UAVs. However, to
+employ event cameras for use in orthomosaic mapping, we
+require a sensor stack which can collect time synchronized
+data to allow event fusion. Additionally, we need processing
+methods to convert the collected event data into a format
+compatible with existing open source orthomosaic mapping
+tools.
+Our contributions are:
+• The development of a hardware and software archi-
+tecture to capture synchronized high-resolution events,
+RGB images, IMU measurements, and range measure-
+ments.
+• A method to integrate the event camera data into off-
+the-shelf orthomosaic generation tools, and benchmark
+the results against RGB reconstructions.
+• An open-source high-altitude event camera dataset,
+comprising synchronized data of our high-altitude UAV
+flying in challenging light conditions and at high speed.
+Our contributions demonstrate that event-camera orthomap-
+ping is a promising direction of research, and our dataset
+provides vital baselines for future researchers in the field.
+II. RELATED WORK
+The most relevant research related to our work can either
+be classified as using event cameras to increase the dynamic
+range of RBG cameras or leveraging them for event recon-
+struction. We briefly summarized this existing work.
+Event cameras feature a high dynamic range as each pixel
+in the sensor can trigger independently of the other ones.
+Some works have leveraged event cameras to increase the
+dynamic range of CMOS-based cameras. In [8], the authors
+pioneered the use of mixed representations, fusing image
+frames and events. In [9], the authors used event cameras
+to deblur and enhance a video stream before upsampling.
+In [10], the authors proposed a network architecture using
+deformable convolutions and LSTM to enhance the dynamic
+range in static images. The authors used a similar set of
+sensors to the ones used in this work mounted on a beam-
+splitter setup. More recently, Li et al. [6] recognized that
+event cameras can be used to enhance the dynamic range
+of aerial images. The authors propose a gradient-enhanced
+high dynamic range (HDR) reconstruction network coupled
+with an event-based dynamic range enhancement network.
+While these existing works highlight the advantages of
+event cameras for aerial imaging, they do not address the
+integration of the sensor for mapping.
+Multiple works have focused on reconstruction of bright-
+ness frames from event data. Reconstructed images could be
+used to apply mature computer vision algorithms [11]. We
+apply this approach in our work, leveraging existing tools for
+orthomapping. Besides higher dynamic range, reconstructed
+50 Hz
+Pulse
+25 MHz 
+Clock
+EVK4 Event 
+Camera
+Synchronization Board
+Data Collection Computer
+ROS 2 Acquisition 
+Software
+Gyro + Accel + Mag
+Event Stream
+Timer
+Enable
+1 Hz
+Pulse
+High 
+Frequency 
+Timer
+Legend
+                Sync board HW
+              Sensors
+              Software/Firmware  
+              Compute Platforms              
+Synchronization Signals
+              Data Signals
+Control Signals
+25 MHz 
+Oscillator
+Low 
+Frequency 
+Timer
+Blackﬂy S 
+U3-32S4C-C
+VN-100-T 
+IMU
+ZED F9P
+GNSS
+Image Frames
+50 Hz
+Pulse
+Lat/Long
+SF000 
+Range Sensor
+Depth
+Fig. 2.
+System architecture for data acquisition. The synchronization board
+generates pulse signals that are used to trigger (Blackfly S) or timestamp
+sensors (event camera, IMU, GNSS). Data is collected on an onboard
+computer running ROS 2, and synchronization is performed after the fact.
+The single-point LiDAR distance sensor is the only sensor that is not
+hardware synchronized.
+frames also have a higher temporal resolution, allowing for
+high-speed video reconstruction [12]. Event reconstruction
+can be performed using filter-based methods [8], pixel-wise
+integration [13], [14], [15], or learning methods. E2VID [12],
+[16] proposed a UNet-like architecture to synthesize net-
+works from events, with outstanding results. As we are
+interested in textures of the environment, we rely on event
+reconstruction as part of our pipeline.
+III. METHODS
+To address the problem of using event cameras for or-
+thomosaic mapping, we need time-synchronized sensor data.
+We also need to preprocess this data to adapt it to existing
+orthomosic mapping frameworks.
+A. UAV and Data Acquisition Hardware
+1) Time Synchronization: Time synchronization is essen-
+tial for multi-sensor datasets including event cameras, due
+to the high resolution of the sensors [17], [18]. In this
+work, time synchronization was achieved using physical
+synchronization signals between the different sensors, as
+shown in Fig. 2.
+A synchronization board based on the STM32L011 micro-
+controller generates signals using two synchronized timers
+at 50 Hz and 1 Hz. The 50 Hz signal is used to trigger
+frame captures on the RGB camera. Additionally, the event
+camera and the IMU use this signal to timestamp their
+measurements. Specifically, on the event camera, every time
+a signal is received, the local sensor timestamp is recorded
+and transmitted to the computer as part of the event stream.
+In addition, each IMU message includes the time elapsed
+between the current measurement and the last synchroniza-
+tion signal. A similar timestamping mechanism is used for
+the Global navigation satellite system (GNSS), recording the
+GNSS timestamp when a synchronization signal is received.
+An important problem we address is matching the first
+synchronization pulse across sensors. To generate an un-
+equivocal start signal for all the sensors, we created a
+Sequence
+Duration [s]
+Area
+Time of the day
+Height [m]
+Speed [m/s]
+Bias on/off
+Overlap [%]
+Illumination
+F1.D.1
+514
+A
+Noon
+40
+3
+0/0
+82%
+Cloudy
+F1.D.2
+507
+A
+Noon
+40
+3
+50/50
+82%
+Cloudy
+F2.D.1
+615
+A
+Afternoon
+40
+3
+50/50
+64%
+Sunny
+F2.D.2
+614
+B
+Afternoon
+40
+3
+100/100
+64%
+Sunny
+F2.D.3
+528
+A
+Evening
+40
+3
+50/50
+64%
+Sunny
+F2.D.4
+541
+A
+Evening
+40
+3
+0/0
+64%
+Sunny
+F2.N.1
+555
+A
+Sunset
+40
+3
+0/0
+64%
+-
+F2.N.2
+554
+A
+Dusk
+40
+3
+50/50
+64%
+-
+F2.N.3
+541
+A
+Night
+40
+3
+100/100
+64%
+-
+F3.D.1
+1282
+A
+Afternoon
+35
+3
+0/0
+80% (cross-hatch)
+Cloudy
+F3.D.2
+671
+A
+Afternoon
+40
+3
+0/0
+82%
+Cloudy
+F3.D.3
+558
+A
+Evening
+35
+6
+0/0
+80%
+Cloudy
+F3.D.4
+489
+A
+Evening
+35
+9
+0/0
+80%
+Cloudy
+F3.N.1
+832
+A
+Sunset
+35
+3
+0/0
+80%
+-
+F3.N.1
+853
+A
+Dusk
+35
+3
+0/0
+80%
+-
+TABLE I
+DATA SEQUENCES FOR THE HIGH-ALTITUDE EVENT CAMERA DATASET, SHOWCASING DIFFERENT LIGHT CONDITIONS, FLIGHT PATTERNS, AND BIAS.
+50 Hz
+1 Hz
+Fig. 3.
+Time synchronization pattern inserted in the synchronization signal.
+The silence gaps in the signal are predefined, enabling to identify the
+beginning of the timing sequence for all the sensors.
+temporal pattern in the synchronization signal upon receipt of
+the timer enable command by the data collection computer.
+Data synchronization can be performed after the fact by
+analyzing the different timestamps of the messages. An
+example of the temporal pattern can be observed in Fig. 3.
+2) Hardware description: Collecting data for orthomosaic
+mapping requires building a hardware sensor suite that
+satisfies the payload capabilities of a UAV, including an event
+camera and RGB camera. As such, we perform experiments
+with the Falcon 4 platform [19], fitted with a data collection
+computer with an AMD Ryzen 9 7940HS processor, 32
+GB of RAM, and 1 TB SSD. The flight controller is
+an ARKV6X, capable of flying pre-defined GPS waypoint
+missions.
+The UAV is fitted with the following sensors:
+• FLIR Blackfly S BFS-U3-32S4C-C: RGB camera,
+with an IMX252 sensor (2048x1536). The camera is
+fitted with a Kowa LM5JCM, and captures images
+at 50 Hz. The field of view (FoV) of the camera is
+71◦×56◦. The exposure time for this sensor is adjusted
+automatically between 5 ms and 15 ms, using the expo-
+sure controller from flir camera driver [20].
+• SilkyEVCamHD: IMX636-based event camera, fitted
+with a LM5JCM lens. We use event camera biases to
+configure the sensitivity of the sensor to different light
+conditions. For our experiments, we set all the biases
+to zero, except bias diff on and bias diff off
+which were set to 0, 50 and 100 for different sequences.
+The FoV of the camera is 64◦× 39◦. In our previ-
+ous work [17] we observed that using an event rate
+controller (ERC) negatively impacts the quality of the
+events. Therefore, we conducted our data collection
+without employing an ERC.
+• VN-100-T
+IMU: 9-DOF temperature compensated
+IMU, running at 400 Hz. The IMU provides an attitude
+estimation, compensated acceleration, compensated an-
+gular rates, and pressure measurements.
+• SF000/B range sensor: mounted between the two
+cameras, it provides a single-point depth estimate of
+the image under the cameras. This sensor captures data
+at ≈60 Hz. The range sensor is the only sensor in
+our stack that lacks hardware synchronization capability.
+This is not a major limitation in this work, as we only
+use the sensor to determine an adequate altitude to start
+and stop processing data, as described in Sec. III-C.
+• ZED-F9P GNSS: runs at 5 Hz in multi-constellation
+configuration. A TOP106 multi-band L1/L2 antenna is
+used to maximize satellite count and minimize interfer-
+ence from the UAV onboard computer.
+All these sensors with exception of the GNSS module are
+fitted in a rigid carbon fiber plate, and attached to the UAV
+using vibration-absorbing foam pads. Dampening is critical
+to reduce high-frequency vibrations from the motors of the
+UAV, which may generate a significant number of events.
+Fig. 1 shows a picture of the platform with the sensor stack,
+and Fig. 2 presents an overview of the system architecture.
+B. Data Collection Procedure
+We collected 15 sequences with our high altitude UAV
+at the Pennovation campus in Philadelphia, PA, USA. This
+location showcases a semi-urban environment, with buildings
+and green areas with grass and trees. The flight area is ap-
+Events
+Rotation and 
+altitude ﬁltering
+RGB
+IMU
+Remapping to 
+match events
+Representation 
+Fusion
+ODM 
+Orthomap 
+Generation
+Event Frame 
+Reconstruction
+GNSS
+Range Sensor
+Rotation and 
+altitude ﬁltering
+Spatial 
+Downsampling
+Spatial 
+Downsampling
+Fig. 4.
+EvMAPPER data preprocessing pipeline. Events and RGB images
+are collected when the UAV is not performing aggressive rotations. Events
+are reconstructed into frames, and RGB images are remapped to match
+the event frames. The resulting representations are fed into an off-the-shelf
+orthomap generation tool.
+Fig. 5.
+Ground truth reconstruction using F3.D.1 and F3.D.2 sequences. Left: Orthophoto. Right: Point cloud.
+proximately 11700 m2. Flights were performed at an altitude
+of 35 m or 40 m above ground level (AGL), using pre-defined
+lawnmower pattern missions. The details about the sequences
+are in Tab. I. The speed of the UAV varies from 3 m/s to
+9 m/s. Areas A and B correspond to to different regions
+of the campus. The bias setting refers to the event camera
+configuration described in Sec. III-A.2. Overlap represents
+the approximate image overlap between two parallel flight
+tracks in the waypoint mission. Finally, the illumination
+conditions are varied to have enough diversity in the event
+camera stream.
+Sequences are synchronized following the approach de-
+scribed in Sec. III-A.1 and the resulting synchronized files
+are saved both in MCAP [21] and HDF [22] formats. Camera
+and IMU calibrations are obtained using Kalibr [23]. To cal-
+ibrate the event and RGB cameras, events are reconstructed
+using simple image recon [14].
+C. Data Preprocessing & Orthomosaic Mapping
+To ensure the data collected fits within existing orthomo-
+saicing frameworks, we require data preprocessing methods
+(Fig. 4). This includes filtering, reconstructing the events
+into frame representations, and downsampling and fusion of
+the RGB and event representations. Once data is properly
+prepared, orthomosaic mapping is performed.
+High altitude UAVs are affected by vibrations due to
+their motors and also wind gusts. These vibrations generate
+motion blur in the RGB images, as well as an increased
+number of events. In the context of high-altitude imaging,
+rotational vibrations have the largest impact in the quality
+of the image. Therefore, the first stage in EvMAPPER is to
+perform rotation filtering of the events and images using the
+IMU. This filtering skips data when the UAV is performing
+an aggressive rotation, e.g., when the UAV is accelerating
+or stopping at a waypoint. A threshold is used to eliminate
+values when the norm of the angular velocity is above
+0.4 rad/s. Similarly, we want to avoid using data from low-
+altitude settings when the UAV is taking off or landing. We
+filter out data when the UAV is below 20 m AGL.
+To
+reconstruct
+frames
+from
+events
+we
+leverage
+E2VID [12]. Reconstructions are performed using 5 ms
+event windows. The resulting images are monochromatic,
+with higher dynamic range than the RGB counterparts, yet
+lacking in low-frequency texture information.
+Orthomosaic reconstructions require adequate spacing be-
+tween frames: too much overlap increases the computational
+cost of the reconstruction, whereas too little can affect the
+matching process. The lateral overlap of the images is defined
+by the mission flight pattern. The longitudinal overlapping
+is defined by sub-sampling images and events. We use the
+GNSS for this task, to generate a single image every 2 m.
+The representation fusion uses synchronized RGB frames
+and the event representation to generate a new image. This
+approach is similar to pansharpening, in which a pair of
+multispectral and panchromatic images are fused [24]. We
+selected the Brovey, ESRI, and mean pansharpening ap-
+proaches to generate the fused representations and evaluate
+their results in the generated orthomap. RGB images are
+remapped to the event frame reconstruction before process-
+ing, using the calibrations obtained in Sec. III-B.
+Finally, the input for the orthomap generation is a set of
+images and Universal Transverse Mercator (UTM) coordi-
+nates which can be obtained from GNSS. The orthomap
+generation approaches uses the off-the-shelf reconstruction
+software ODM [4]. A resolution of 1 cm/px was chosen for
+the orthomosaic generation, with an octree depth of 13, and
+a minimum number of features of 12000.
+IV. RESULTS
+A. Evaluation Approach
+We generate a ground truth reconstruction using a com-
+bination of RGB images from F3.D.1 and F3.D.2 se-
+quences, without performing any modifications to the im-
+ages. This reconstruction corresponds to the highest quality
+one available in the dataset: both missions are flown in
+benign light conditions (cloudy evenings), encompassing a
+larger area than other flights. In addition, F3.D.1 flight
+Fig. 6.
+Resulting reconstructions for the F1.D.1 sequence for cropped RGB, events only, mean fusion and Brovey fusion. The detail (bottom left
+rectangle) shows the sidewalk reconstruction, an area of high dynamic range. We observe how the RGB reconstruction fails for this particular sequence,
+whereas the events and fusions are able to display this area correctly.
+Sequence
+Type
+PSNR Color [dB]
+PSNR Gray [dB]
+SSIM [%]
+Non-zero pixels [M]
+F1.D.1
+RGB Cropped
+11.01
+10.88
+0.54
+826.58
+F1.D.1
+Events Only
+9.41
+9.39
+0.49
+953.39
+F1.D.1
+Mean Fusion
+9.87
+9.77
+0.50
+959.39
+F1.D.1
+ESRI Fusion
+9.38
+9.26
+0.48
+953.54
+F1.D.1
+Brovey Fusion
+9.99
+9.87
+0.51
+953.73
+F3.N.1
+RGB Cropped
+12.47
+12.41
+0.63
+692.33
+F3.N.1
+Events Only
+10.52
+10.68
+0.59
+645.12
+F3.N.1
+Mean Fusion
+12.08
+12.13
+0.65
+692.09
+F3.N.1
+ESRI Fusion
+9.64
+9.69
+0.53
+844.95
+F3.N.1
+Brovey Fusion
+10.55
+10.46
+0.55
+844.53
+F3.N.2
+RGB Cropped
+8.05
+7.92
+0.36
+723.62
+F3.N.2
+Mean Fusion
+9.26
+9.12
+0.48
+1022.84
+TABLE II
+RESULTS ON DATA SEQUENCES FOR HIGH DYNAMIC RANGE (F1.D.1), AND LOW-LIGHT CONDITIONS (F3.N.1 AND F3.N.2).
+mission is longer because the UAV flew a cross-hatch pattern,
+reducing the probability of non-matched images. The ground
+truth ortophoto and point cloud can be observed in Fig. 5.
+We align the test image with the ground truth recon-
+struction using manual feature matching and homography
+transformations, using five reference points. We then com-
+pute the peak signal-to-noise ratio (PSNR) and structural
+similarity index (SSIM) metrics between the two images. As
+the reconstruction may succeed without including the whole
+set of images, we also report the total number of non-zero
+pixels. We consider that a reconstruction failed when the
+reference points for the homography cannot be found, or
+when ODM fails to generate the orthomosaic.
+B. Results and Discussion
+The results are in Table II. RGB cropped corresponds to
+the RGB image remapped to the same size as the event
+image. Events only is the reconstruction of the events without
+fusion with RGB. For reference, a completely black image
+would have a PSNR of 7.18 dB, whereas a completely white
+image would have a PSNR of 6.05 dB.
+1) High-brightness conditions: The sequence F1.D.1
+is a high-brightness sequence as it was recorded at noon
+on a sunny day. We can observe in this sequence that the
+RGB reconstruction matches the ground truth quite well,
+achieving the highest PSNR and SSIM. There are, however,
+some areas of the image that are better reconstructed using
+events, such as the detail displayed in Fig. 6. Fused and event
+representations are able to capture the detail in the sidewalk
+next to the building, as well as in areas in the shadows.
+Among our reconstructions, we observe that mean and
+Brovey fusion outperform the vanilla event reconstruction.
+This shows how fusing events with RGB can provide a better
+reconstruction than using events alone.
+2) Low-light conditions: We can observe that the pro-
+posed method performs well on low-light conditions, as
+shown by the results in F3.N.1 and particularly F3.N.2.
+For F3.N.1, the RGB reconstruction still performs slightly
+better for PSNR, but the SSIM is better for the mean fusion.
+As this sequence is recorded at sunset, there is still enough
+light for the RGB sensor to capture the scene. On the other
+hand, the fusion methods performed better for F3.N.2. It
+is worth noting that in this sequence the mean fusion was
+the only method that was able to generate results besides the
+RGB cropped image. The other methods (ESRI, events only,
+and Brovey) failed to produce an orthomosaic. We observed
+this failure mode for numerous reconstructions with low-light
+conditions, suggesting that mean fusion is a more resilient
+method compared to other approaches.
+Qualitative results can be seen in Fig. 7. We observe that
+areas with artificial illumination reconstruct well in the RGB
+images, but the rest of the image is quite dark. On the
+other hand, the mean fusion method is able to increase the
+overall brightness of the image, improving the level of detail
+in parking lots and sidewalks. However, the fusion method
+increases the overall level of noise in the image, producing
+Fig. 7.
+Orthomap reconstruction results for the F3.N.2 sequence. Left: RGB reconstruction. Right: mean fusion. We observe that the RGB reconstruction
+has multiple dark areas, while the mean fusion reconstruction increases the overall brightness. Some matching artifacts can be observed in the event
+reconstruction.
+artifacts in the reconstruction.
+It was, however, surprising to us that the RGB camera per-
+formed well in these very low light situations. This behavior
+can be explained thanks to the high quantum efficiency of
+the sensor used (60% at 525nm), and the maximum exposure
+time of 15 ms.
+In our results, we observe that frames synthesized from
+events are able to overcome the limitations of RGB images
+given their high dynamic range. Nevertheless, pure event
+representations struggle with high texture complexities such
+as grassy areas. We believe this is due to the limitations of
+the sensor, which generates a significant number of events
+that may saturate its bandwidth.
+V. CONCLUSION
+In this work, we presented a method for high-altitude
+orthomapping using event cameras. To our knowledge, this
+is the first work that leverages the characteristics of event
+cameras to overcome the issues of CMOS-based sensors in
+this setting. We demonstrated that our method enables the
+creation of orthomosaics in low-light conditions, as well as
+qualitative improvements in high dynamic range areas.
+Given the success of this work, there are exciting possi-
+bilities for future work. For example, the experiment area
+for this paper offered a limited amount of high dynamic
+range scenarios, and thus the overall PSNR and SSIM
+metrics performed better than event-based reconstructions.
+We expect event based orthomosaic mapping to perform
+better in more challenging scenarios, such as forests at
+noon. Furthermore, in this work, we leveraged traditional
+image processing pipelines to produce the orthomosaics,
+which relies on FLANN features for matching [25]. How-
+ever, feature tracking in the event space may provide more
+resilient tracking, particularly in low-light conditions [26],
+[27]. Additionally, although we relied on GNSS priors to
+generate the reconstruction, there are promising future direc-
+tions using event-based SLAM approaches for orthomapping
+reconstruction, such as the ones proposed by [28]. Finally, we
+used traditional methods for pansharpening. Consequently,
+we observed that the noise in the fused images was higher
+than the base RGB. Generative methods have outperformed
+traditional methods in satellite imaging and one possibility
+is training these generative methods on event data to yield
+sharper reconstructions.
+ACKNOWLEDGMENTS
+The authors would like to thank Alex Zhou and Jeremy
+Wang for their help maintaining the platforms and manufac-
+turing the hardware components of the UAV, and Benedict
+Onyekwe for his help routing the synchronization board. We
+would like to acknowledge the invaluable work of Bernd
+Pfrommer for maintaining the open-source ROS drivers used
+for data collection and post-processing for both event and
+RGB cameras, as well as his valuable suggestions to generate
+event reconstructions. We finally would like to thank Victoria
+Edwards and Mariana Quesada for reviewing this manuscript.
+REFERENCES
+[1] A. Q. Valenzuela and J. C. G. Reyes, “Basic spatial resolution metrics
+for satellite imagers,” IEEE Sensors Journal, vol. 19, no. 13, pp. 4914–
+4922, 2019.
+[2] K. Jacobsen et al., “High resolution satellite imaging systems-
+an overview,” Photogrammetrie Fernerkundung Geoinformation, vol.
+2005, no. 6, p. 487, 2005.
+[3] “Professional photogrammetry and drone mapping software —
+pix4d.com,” https://www.pix4d.com/, [Accessed 01-09-2024].
+[4] “Drone
+Mapping
+Software
+-
+OpenDroneMap™
+—
+open-
+dronemap.org,”
+https://www.opendronemap.org/,
+[Accessed
+01-
+09-2024].
+[5] “Tutorials;
+OpenDroneMap
+3.5.3
+documentation
+—
+docs.opendronemap.org,”
+https://docs.opendronemap.org/tutorials/,
+[Accessed 01-09-2024].
+[6] X. Li, S. Cheng, Z. Zeng, C. Zhao, and C. Fan, “ERS-HDRI: Event-
+Based Remote Sensing HDR Imaging,” Remote Sensing, vol. 16, no. 3,
+p. 437, 2024.
+[7] N. Escudero, M. W. Hardt, and G. Inalhan, “Enabling UAVs night-
+time navigation through Mutual Information-based matching of event-
+generated images,” in 2023 IEEE/AIAA 42nd Digital Avionics Systems
+Conference (DASC).
+IEEE, 2023, pp. 1–10.
+[8] C. Scheerlinck, N. Barnes, and R. Mahony, “Continuous-time intensity
+estimation using event cameras,” in Asian Conference on Computer
+Vision.
+Springer, 2018, pp. 308–324.
+[9] C. Haoyu, T. Minggui, S. Boxin, W. YIzhou, and H. Tiejun, “Learning
+to deblur and generate high frame rate video with an event camera,”
+arXiv preprint arXiv:2003.00847, 2020.
+[10] N. Messikommer, S. Georgoulis, D. Gehrig, S. Tulyakov, J. Erbach,
+A. Bochicchio, Y. Li, and D. Scaramuzza, “Multi-bracket high dy-
+namic range imaging with event cameras,” in Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition,
+2022, pp. 547–557.
+[11] G. Gallego, T. Delbr¨uck, G. Orchard, C. Bartolozzi, B. Taba, A. Censi,
+S. Leutenegger, A. J. Davison, J. Conradt, K. Daniilidis et al., “Event-
+based vision: A survey,” IEEE transactions on pattern analysis and
+machine intelligence, vol. 44, no. 1, pp. 154–180, 2020.
+[12] H. Rebecq, R. Ranftl, V. Koltun, and D. Scaramuzza, “High speed and
+high dynamic range video with an event camera,” IEEE transactions
+on pattern analysis and machine intelligence, vol. 43, no. 6, pp. 1964–
+1980, 2019.
+[13] C. Brandli, L. Muller, and T. Delbruck, “Real-time, high-speed video
+decompression using a frame-and event-based DAVIS sensor,” in 2014
+IEEE International Symposium on Circuits and Systems (ISCAS).
+IEEE, 2014, pp. 686–689.
+[14] B. Pfrommer, “simple image recon - simple image reconstruction
+for an event based camera,” https://github.com/berndpfrommer/simple
+image recon, [Accessed 06-09-2024].
+[15] A. Bisulco, F. Cladera, V. Isler, and D. D. Lee, “Fast Motion
+Understanding with Spatiotemporal Neural Networks and Dynamic
+Vision Sensors,” in 2021 IEEE International Conference on Robotics
+and Automation (ICRA), 2021, pp. 14 098–14 104.
+[16] H. Rebecq, R. Ranftl, V. Koltun, and D. Scaramuzza, “Events-to-
+Video: Bringing Modern Computer Vision to Event Cameras,” IEEE
+Conf. Comput. Vis. Pattern Recog. (CVPR), 2019.
+[17] K. Chaney, F. Cladera, Z. Wang, A. Bisulco, M. A. Hsieh, C. Korpela,
+V. Kumar, C. J. Taylor, and K. Daniilidis, “M3ED: Multi-Robot, Multi-
+Sensor, Multi-Environment Event Dataset,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR) Workshops, June 2023, pp. 4015–4022.
+[18] V. Osadcuks, M. Pudzs, A. Zujevs, A. Pecka, and A. Ardavs, “Clock-
+based time synchronization for an event-based camera dataset acqui-
+sition platform,” in 2020 IEEE International Conference on Robotics
+and Automation (ICRA).
+IEEE, 2020, pp. 4695–4701.
+[19] X. Liu, G. V. Nardari, F. Cladera, Y. Tao, A. Zhou, T. Donnelly, C. Qu,
+S. W. Chen, R. A. F. Romero, C. J. Taylor, and V. Kumar, “Large-Scale
+Autonomous Flight With Real-Time Semantic SLAM Under Dense
+Forest Canopy,” IEEE Robotics and Automation Letters, vol. 7, no. 2,
+pp. 5512–5519, 2022.
+[20] B. Pfrommer, “flir camera driver - ROS Teledyne FLIR camera
+drivers,”
+https://github.com/ros-drivers/flir camera driver/tree/
+humble-devel, [Accessed 16-09-2024].
+[21] J. Hurliman, “MCAP: A Next-Generation File Format for ROS
+Recording,” http://download.ros.org/downloads/roscon/2022/MCAP%
+20A%20Next-Generation%20File%20Format%20for%20ROS%
+20Recording.pdf, 2022, [Accessed 02-09-2024].
+[22] M. Folk, G. Heber, Q. Koziol, E. Pourmal, and D. Robinson, “An
+overview of the HDF5 technology suite and its applications,” in
+Proceedings of the EDBT/ICDT 2011 workshop on array databases,
+2011, pp. 36–47.
+[23] J. Rehder, J. Nikolic, T. Schneider, T. Hinzmann, and R. Siegwart,
+“Extending kalibr: Calibrating the extrinsics of multiple IMUs and of
+individual axes,” in 2016 IEEE International Conference on Robotics
+and Automation (ICRA).
+IEEE, 2016, pp. 4304–4311.
+[24] G. Vivone, L. Alparone, J. Chanussot, M. Dalla Mura, A. Garzelli,
+G. A. Licciardi, R. Restaino, and L. Wald, “A Critical Comparison
+Among Pansharpening Algorithms,” IEEE Transactions on Geoscience
+and Remote Sensing, vol. 53, no. 5, pp. 2565–2586, 2015.
+[25] M. Muja and D. Lowe, “Flann-fast library for approximate nearest
+neighbors user manual,” Computer Science Department, University of
+British Columbia, Vancouver, BC, Canada, vol. 5, no. 6, 2009.
+[26] N. Messikommer, C. Fang, M. Gehrig, and D. Scaramuzza, “Data-
+driven feature tracking for event cameras,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2023, pp. 5642–5651.
+[27] D. Gehrig, H. Rebecq, G. Gallego, and D. Scaramuzza, “Asyn-
+chronous, photometric feature tracking using events and frames,” in
+Proceedings of the European Conference on Computer Vision (ECCV),
+2018, pp. 750–765.
+[28] S. Guo and G. Gallego, “CMax-SLAM: Event-Based Rotational-
+Motion Bundle Adjustment and SLAM System Using Contrast Max-
+imization,” IEEE Transactions on Robotics, vol. 40, pp. 2442–2461,
+2024.
