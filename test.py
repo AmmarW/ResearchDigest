@@ -1,5 +1,6 @@
 import arxiv
 import requests
+import streamlit as st
 import fitz  # PyMuPDF for PDF text extraction
 from transformers import pipeline
 import os
@@ -10,8 +11,15 @@ TEXT_DIR = "extracted_texts"
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(TEXT_DIR, exist_ok=True)
 
-# 2. Fetch recent papers from arXiv in the Robotics category
-def fetch_arxiv_papers(query="cs.RO", max_results=5):
+# 2. Cache the summarizer to avoid reloading the model each time
+@st.cache_resource
+def load_summarizer():
+    return pipeline("summarization", model="t5-small")
+
+summarizer = load_summarizer()
+
+# 3. Fetch recent papers from arXiv in the Robotics category
+def fetch_arxiv_papers(query="cs.RO", max_results=1):
     search = arxiv.Search(
         query=query,
         max_results=max_results,
@@ -19,40 +27,36 @@ def fetch_arxiv_papers(query="cs.RO", max_results=5):
     )
     return search.results()
 
-# 3. Download the PDFs of the papers
-def download_pdf(url, file_name):
+# 4. Download and extract text from PDFs
+def download_and_extract_text(paper):
     try:
-        # Follow redirects to ensure we reach the correct URL
-        response = requests.get(url, allow_redirects=True)
-        
-        # Check if the response is OK (200 status code)
-        if response.status_code == 200:
-            # Make sure file has .pdf extension
-            if not file_name.endswith(".pdf"):
-                file_name += ".pdf"
-            print("file_name::::",file_name)
-            with open(file_name, 'wb') as f:
-                f.write(response.content)
-            print(f"Downloaded: {file_name}")
-        else:
-            print(f"Failed to download {file_name}. Status code: {response.status_code}")
+        pdf_url = paper.pdf_url
+        title_safe = paper.title.replace(':', '_').replace('/', '_')  # Handle unsafe characters
+        pdf_file_name = os.path.join(PDF_DIR, f"{title_safe}.pdf")
+
+        # Download PDF if not already downloaded
+        if not os.path.exists(pdf_file_name):
+            response = requests.get(pdf_url, allow_redirects=True)
+            if response.status_code == 200:
+                with open(pdf_file_name, 'wb') as f:
+                    f.write(response.content)
+            else:
+                return None, f"Failed to download {pdf_file_name}. Status code: {response.status_code}"
+
+        # Extract text from the downloaded PDF
+        doc = fitz.open(pdf_file_name)
+        text = "".join([doc.load_page(page_num).get_text() for page_num in range(doc.page_count)])
+        if not text:
+            return None, "No text extracted from the PDF."
+
+        return text, None
+
     except Exception as e:
-        print(f"Error downloading {file_name}: {e}")
+        return None, f"Error downloading or extracting text: {e}"
 
-# 4. Extract text from PDFs
-def extract_text_from_pdf(pdf_path):
-    doc = fitz.open(pdf_path)
-    text = ""
-    for page_num in range(doc.page_count):
-        page = doc.load_page(page_num)
-        text += page.get_text()
-    return text
-
-# 5. Summarize text using an LLM (Hugging Face T5 model)
+# 5. Summarize text
 def summarize_text(text):
-    summarizer = pipeline("summarization", model="t5-small")  # You can use t5-base for larger summaries
-    summary = summarizer(text, max_length=8000, min_length=100, do_sample=False)
-    return summary[0]['summary_text']
+    return summarizer(text, max_length=8000, min_length=100, do_sample=False)[0]['summary_text']
 
 # 6. Categorize papers based on predefined subdomains
 def categorize_paper(text):
@@ -66,59 +70,50 @@ def categorize_paper(text):
             return category
     return "Uncategorized"
 
-# 7. Process pipeline
-def process_arxiv_papers():
-    # Fetch arXiv papers
-    papers = fetch_arxiv_papers()
-    
+# 7. Process arXiv papers
+def process_arxiv_papers(max_results):
+    papers = fetch_arxiv_papers(max_results=max_results)
     results = []
-    
+
     for paper in papers:
         title = paper.title
-        pdf_url = paper.pdf_url
-        pdf_file_name = f"{PDF_DIR}\\{title.replace(':', '_')}.pdf"
-        # Download PDF
-        download_pdf(pdf_url, pdf_file_name)
+        extracted_text, error = download_and_extract_text(paper)
         
-        # Extract text from PDF
-        extracted_text = extract_text_from_pdf(pdf_file_name)
-        if not extracted_text:
-            continue  # Skip to the next paper if extraction fails
-        
-        text_file_name = f"{TEXT_DIR}/{title.replace(':', '_')}.txt"
-        try:
-            with open(text_file_name, 'w', encoding='utf-8') as text_file:
-                text_file.write(extracted_text)
-        except Exception as e:
-            print(f"Error writing to file {text_file_name}: {e}")
+        if error:
+            print(error)
             continue
         
-        # Summarize the text (limit to 2000 characters to avoid performance issues)
-        summary = summarize_text(extracted_text[:5000])
-        
-        # Categorize the paper
-        category = categorize_paper(extracted_text)
-        
-        # Save results
-        results.append({
-            "title": title,
-            "summary": summary,
-            "category": category
-        })
-    
+        if extracted_text:
+            summary = summarize_text(extracted_text[:5000])
+            category = categorize_paper(extracted_text)
+            results.append({
+                "title": title,
+                "summary": summary,
+                "category": category
+            })
+
     return results
 
-# 8. Output the results
-def save_results(results, output_file="arxiv_summary.txt"):
-    with open(output_file, 'w', encoding='utf-8') as f:
-        for result in results:
-            f.write(f"Title: {result['title']}\n")
-            f.write(f"Category: {result['category']}\n")
-            f.write(f"Summary: {result['summary']}\n")
-            f.write("="*50 + "\n\n")
-    print(f"Results saved to {output_file}")
+# 8. Display the results in Streamlit
+def display_summary_dashboard(results):
+    st.title("Arxiv Paper Summaries")
+
+    for result in results:
+        st.header(result['title'])
+        st.subheader(f"Category: {result['category']}")
+        st.write(result['summary'])
+        st.write("---")
 
 # Main function to execute the pipeline
 if __name__ == "__main__":
-    results = process_arxiv_papers()
-    save_results(results)
+    # Add a number input for the max_results value
+    max_results = st.number_input("Enter the number of papers to fetch:", min_value=1, max_value=100, value=5)
+    
+    if st.button("Fetch and Process Papers"):
+        # Fetch and process papers based on user input for max_results
+        results = process_arxiv_papers(max_results=max_results)
+        
+        if results:
+            display_summary_dashboard(results)
+        else:
+            st.write("No papers were processed or an error occurred.")

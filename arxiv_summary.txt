@@ -3,23 +3,3 @@ Category: Control Systems
 Summary: we propose a framework for active mapping and exploration that leverages Gaussian splatting for constructing information-rich maps . the map constructed onboard the robot is optimized for both photometric and geometric qual- ity while enabling real-time situational awareness for autonomy . in real-world experiments, our algorithm achieves better map quality (10% higher Peak Signal-to-Noise Ratio (PSNR) and 30% higher geometric reconstruction accuracy .
 ==================================================
 
-Title: Robot See Robot Do: Imitating Articulated Object Manipulation with Monocular 4D Reconstruction
-Category: Control Systems
-Summary: 4D-DPM is a method for imitating articulated object manipulation from a monocular RGB human demonstration given a single static multi- view object scan . the robot replicates object trajectories by planning bimanual arm motions that induce the demonstrated object part motion . each phase of RSRD achieves an average of 87% success rate, for a total end-to-end success rate of 60% across 90 trials each .
-==================================================
-
-Title: EvMAPPER: High Altitude Orthomapping with Event Cameras
-Category: Control Systems
-Summary: CMOS-based cameras are able to generate orthomosaics or orthomaps . this approach enables map generation even in challenging light conditions . event cameras are less sensitive to these issues, as their pixels trigger asynchronously on brightness changes . some of these issues stem from the limitations of the sensors employed . a reconstructed frame with an event camera washed out due to high brightness, and low overlap between images can lead to failures if the data is not properly conditioned .
-==================================================
-
-Title: Language-Embedded Gaussian Splats (LEGS): Incrementally Building Room-Scale Representations with a Mobile Robot
-Category: Control Systems
-Summary: LEGS is trained online as a robot traverses its environment to enable localization of open-vocabulary object queries . results suggest that a multi-camera setup and incremental bundle adjustment can boost visual reconstruction quality in constrained robot trajectories . a large body of recent work uses large vision-language models by distilling their outputs into 3D representations like point clouds or NeRFs [2], showing promise of using large models zero-shot for open vocabulary task specification .
-==================================================
-
-Title: StackGen: Generating Stable Structures from Silhouettes via Diffusion
-Category: Control Systems
-Summary: StackGen: Generating Stable Structures from Silhouettes via Diffusion Luzhe Sun Takuma Yoneda Samuel W. Wheeler Tianchong Jiang Matthew R. Walter Abstract . this intuition governs the way in which we regularly configure objects in our environment, allowing us to build complex structures from simple, everyday objects . instead, robots would benefit from an awareness of intuitive physics that enables them to similarly reason over the stable interaction of objects in their environment .
-==================================================
-
