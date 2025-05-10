@@ -1,5 +1,0 @@
-Title: RT-GuIDE: Real-Time Gaussian splatting for Information-Driven Exploration
-Category: Control Systems
-Summary: we propose a framework for active mapping and exploration that leverages Gaussian splatting for constructing information-rich maps . the map constructed onboard the robot is optimized for both photometric and geometric qual- ity while enabling real-time situational awareness for autonomy . in real-world experiments, our algorithm achieves better map quality (10% higher Peak Signal-to-Noise Ratio (PSNR) and 30% higher geometric reconstruction accuracy .
-==================================================
-
